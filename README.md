@@ -1,8 +1,6 @@
 # barebones-chat.nvim
 
-A Neovim plugin for streaming LLM completions from any OpenAI-compatible endpoint. Minimal by design: no built-in RAG, no slash commands, no hardcoded prompt templates. A prompt buffer, an SSE streaming client, and a hook pipeline you control entirely from your own config.
-
-Built to work with local models via [LiteLLM](https://github.com/BerriAI/litellm) and [llama-swap](https://github.com/mostlygeek/llama-swap), but works against any OpenAI-compatible API.
+A Neovim plugin for streaming LLM completions from any OpenAI-compatible endpoint. No built-in RAG, no slash commands, no hardcoded prompt templates -- just a prompt buffer, an SSE streaming client, and a hook pipeline. Requires Neovim 0.10+ and `curl` on `$PATH`.
 
 ## Quickstart
 
@@ -25,8 +23,6 @@ Built to work with local models via [LiteLLM](https://github.com/BerriAI/litellm
 ```
 
 Run `:Barebones` to open the prompt buffer. Press `<CR>` in normal mode to submit.
-
-No dependencies beyond Neovim 0.10+ and `curl` on `$PATH`.
 
 ## Hooks
 
@@ -112,26 +108,6 @@ Arguments: {"path": "tests/"}
 
 Allow execution? [Y/n]:
 ```
-
-## Architecture
-
-Three files, three concerns.
-
-**`network.lua`** fires a `curl` subprocess via `vim.fn.jobstart` and parses the SSE response line by line. Callbacks run on the Neovim event loop. Handles OpenAI (`choices[0].delta.content`), Anthropic (`content_block_delta`), and Ollama (`message.content`) delta formats. No provider logic; pure streaming HTTP.
-
-```
-stream_request(payload, opts)
-  opts.url          -- endpoint URL
-  opts.headers      -- HTTP headers table
-  opts.on_chunk     -- called with each text delta
-  opts.on_tool_call -- called with tool_calls array
-  opts.on_error     -- called with error string
-  opts.on_complete  -- called when stream closes
-```
-
-**`ui.lua`** manages a single scratch buffer in a vertical split (`filetype=markdown`). Exposes `create_buffer()` and `append_text(str)`. The buffer handle is available as `ui.buf` for hooks that need to read it.
-
-**`init.lua`** owns configuration, runs the hooks pipeline, assembles the message payload, and dispatches to `network` and `ui`. Also exposes `M.utils.get_visual_selection()` and `M.default_tools` for use in user configs.
 
 ## Local LLM setup
 
