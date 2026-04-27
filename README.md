@@ -109,6 +109,10 @@ Arguments: {"path": "tests/"}
 Allow execution? [Y/n]:
 ```
 
+## Security
+
+See [SECURITY.md](SECURITY.md) for the trust model and guidance on wiring up tools safely.
+
 ## Local LLM setup
 
 See [docs/local-llm-setup.md](docs/local-llm-setup.md) for a full walkthrough of the [LiteLLM](https://github.com/BerriAI/litellm) + [llama-swap](https://github.com/mostlygeek/llama-swap) stack this plugin was built against, including running LiteLLM as a Windows service with NSSM.
