@@ -1,6 +1,6 @@
 # barebones-chat.nvim
 
-A Neovim plugin for streaming LLM completions from any OpenAI-compatible endpoint. No built-in RAG, no slash commands, no hardcoded prompt templates -- just a prompt buffer, an SSE streaming client, and a hook pipeline. Requires Neovim 0.10+ and `curl` on `$PATH`.
+A Neovim plugin for streaming LLM completions from any OpenAI-compatible endpoint. No built-in RAG, no slash commands, no hardcoded prompt templates, just a prompt buffer, an SSE streaming client, and a hook pipeline. Requires Neovim 0.10+ and `curl` on `$PATH`.
 
 ## Quickstart
 
