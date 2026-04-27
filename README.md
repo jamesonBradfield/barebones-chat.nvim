@@ -159,6 +159,8 @@ Injected as `{ role = "system" }` as the first message if set.
 
 No dependencies beyond Neovim 0.10+ and `curl` on `$PATH`.
 
+Works out of the box with any OpenAI-compatible proxy — tested against [LiteLLM](https://github.com/BerriAI/litellm) fronting [llama-swap](https://github.com/mostlygeek/llama-swap). See [docs/local-llm-setup.md](docs/local-llm-setup.md) for a full walkthrough of that stack.
+
 ## Usage
 
 Run `:Barebones` to open the prompt buffer. Write your prompt and press `<CR>` in normal mode to submit.
