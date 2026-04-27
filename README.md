@@ -1,113 +1,164 @@
 # barebones-chat.nvim
 
-A minimal, unopinionated "agentic micro-framework" for Neovim. 
+A minimal Neovim plugin that gives you a prompt buffer wired to any OpenAI-compatible LLM endpoint. No RAG, no agents, no slash commands, no hardcoded workflows — just the primitive.
 
-Unlike bloated AI plugins with hardcoded commands and proprietary RAG implementations, `barebones-chat.nvim` does exactly one thing well: it provides a robust UI primitive and an event loop that you can extend completely via your `init.lua`. It acts as a bridge between the Neovim API and LLM function calling.
+Most AI plugins (Avante, CodeCompanion, etc.) make strong assumptions: they own the prompt format, the context strategy, the tool set, and the UI. This plugin owns none of those things. It handles the buffer and the HTTP; you handle everything else in your own config.
 
-## Core Philosophy
-1. **The Buffer/UI Manager**: A clean, non-blocking chat interface that renders Markdown beautifully.
-2. **The "Dumb" Curl Wrapper**: A pure, asynchronous HTTP client wrapping `plenary.curl` that handles SSE streaming and tool calls.
-3. **The Extensibility API**: Define your own context hooks and native Lua tools.
+---
 
-## Installation
+## Architecture
 
-Using [lazy.nvim](https://github.com/folke/lazy.nvim):
+Three files, three concerns:
+
+### `network.lua` — HTTP streaming
+
+Fires a `curl` subprocess via `vim.fn.jobstart` and parses the SSE stream line-by-line. Callbacks run on the Neovim event loop, so no `vim.schedule` juggling is needed at the call site.
+
+Handles the OpenAI streaming delta format (`choices[0].delta.content`), Anthropic's `content_block_delta`, and Ollama's `message.content` — whichever your endpoint emits.
+
+```
+stream_request(payload, opts)
+  opts.url          -- full endpoint URL
+  opts.headers      -- table of HTTP headers
+  opts.on_chunk     -- called with each text delta string
+  opts.on_tool_call -- called with tool_calls array
+  opts.on_error     -- called with error string
+  opts.on_complete  -- called when the stream closes
+```
+
+No provider logic lives here. It is a pure streaming HTTP primitive.
+
+### `ui.lua` — buffer management
+
+Creates a single scratch buffer in a vertical split, sets `filetype=markdown`, and exposes two functions:
+
+- `create_buffer()` — opens or focuses the buffer
+- `append_text(str)` — appends streamed text non-destructively, scrolling to the bottom
+
+The buffer handle is exposed as `ui.buf` for hooks that need to inspect it.
+
+### `init.lua` — wiring
+
+Owns configuration, runs the hooks pipeline, builds the message payload, and calls into `network` and `ui`. Also holds `M.utils` (visual selection helper) and `M.default_tools` (the `replace_visual_selection` example).
+
+---
+
+## Extensibility
+
+### Hooks — prompt pipeline
+
+`hooks` is an ordered list of functions applied to the prompt before it is sent. Each function receives the full prompt string and the buffer handle, and must return the modified prompt string.
 
 ```lua
-{
-    "your-username/barebones-chat.nvim",
-    dependencies = { "nvim-lua/plenary.nvim" },
-    config = function()
-        -- See configuration below
+hooks = {
+  function(prompt, buf)
+    -- expand @path/to/file references to absolute paths
+    return prompt:gsub("@([%w%./%-_]+)", function(p)
+      return vim.fn.fnamemodify(p, ":p")
+    end)
+  end,
+
+  function(prompt, buf)
+    -- append current visual selection
+    local selection, _ = require("barebones-chat").utils.get_visual_selection()
+    if selection and selection ~= "" then
+      return prompt .. "\n\n<visual_selection>\n" .. selection .. "\n</visual_selection>"
     end
+    return prompt
+  end,
+
+  function(prompt, buf)
+    -- append git status
+    return prompt .. "\n\n<git_status>\n" .. vim.fn.system("git status --short") .. "</git_status>"
+  end,
 }
 ```
 
-## Configuration & Examples
+Hooks are chained: each receives the output of the previous one. Returning `nil` is safe — it passes the prompt through unchanged.
 
-The plugin exposes a `setup` function where you can define your provider, context hooks, and custom tools.
+### Tools — LLM function calling
 
-### 1. Default Tool Example: Visual Selection Find & Replace
-
-This example demonstrates how to inject the current visual selection into the prompt and provide the LLM with a tool to mutate it.
+`tools` is a table of named functions the LLM can invoke. The plugin formats them as OpenAI-compatible tool definitions and handles the execution loop.
 
 ```lua
-local barebones = require("barebones-chat")
-
-barebones.setup({
-    provider = "anthropic",
-    model = "claude-3-7-sonnet",
-    
-    -- Hook to inject dynamic context into the system prompt
-    on_submit = function(prompt, chat_buffer)
-        local selection, _ = barebones.utils.get_visual_selection()
-        if selection and selection ~= "" then
-            return prompt .. "\n\n<visual_selection>\n" .. selection .. "\n</visual_selection>"
-        end
-        return prompt
-    end,
-
-    -- Define tools natively in Lua for the LLM to call
-    tools = {
-        -- Use the built-in default tool for replacing visual selections
-        replace_visual_selection = barebones.default_tools.replace_visual_selection
-    }
-})
+tools = {
+  run_tests = {
+    description = "Run the test suite and return output.",
+    modifies_state = true,   -- triggers a [Y/n] confirmation prompt
+    parameters = {
+      type = "object",
+      properties = {
+        path = { type = "string", description = "Path to test file or directory." }
+      },
+      required = { "path" }
+    },
+    execute = function(args)
+      return vim.fn.system("pytest " .. vim.fn.shellescape(args.path))
+    end
+  }
+}
 ```
 
-### 2. User Config Example: Exposing `_G` Functions (e.g., Pytest)
+When `modifies_state = true` the user is prompted before execution:
 
-You can easily expose shell commands or native Neovim functions to the LLM. Because `modifies_state = true` is set, the plugin will automatically prompt you with a `[Y/n]` confirmation before executing the command.
+```
+[Barebones] LLM wants to run tool 'run_tests'
+Arguments: {"path": "tests/"}
+
+Allow execution? [Y/n]:
+```
+
+The `execute` function can return any string — the result is displayed in the buffer.
+
+### Chunk processor
+
+`chunk_processor` intercepts each streamed text delta before it hits the buffer. Return `nil` to drop a chunk entirely.
 
 ```lua
-local barebones = require("barebones-chat")
-
-barebones.setup({
-    provider = "openai",
-    model = "gpt-4o",
-    
-    on_submit = function(prompt, chat_buffer)
-        return prompt
-    end,
-
-    tools = {
-        run_pytest = {
-            description = "Run pytest on a specific file and return the output.",
-            modifies_state = true, -- Requires user confirmation [Y/n]
-            parameters = {
-                type = "object",
-                properties = {
-                    filepath = {
-                        type = "string",
-                        description = "The path to the test file to run."
-                    }
-                },
-                required = { "filepath" }
-            },
-            execute = function(args)
-                -- Run the shell command synchronously and capture output
-                local cmd = "pytest " .. vim.fn.shellescape(args.filepath)
-                local output = vim.fn.system(cmd)
-                
-                -- Return the output back to the LLM
-                return output
-            end
-        }
-    }
-})
+chunk_processor = function(text)
+  -- strip thinking tags from models that emit them
+  text = text:gsub("<thinking>.-</thinking>", "")
+  if text == "" then return nil end
+  return text
+end
 ```
+
+### System prompt
+
+```lua
+system_prompt = "You are a helpful assistant. Reply concisely."
+```
+
+Injected as `{ role = "system" }` as the first message if set.
+
+---
+
+## Installation
+
+```lua
+-- lazy.nvim
+{
+  "jamesonBradfield/barebones-chat.nvim",
+  config = function()
+    require("barebones-chat").setup({
+      base_url = "http://localhost:4000",  -- LiteLLM, Ollama, or any OpenAI-compatible endpoint
+      api_key  = os.getenv("LITELLM_API_KEY") or "anything",
+      model    = "your-model-name",
+
+      system_prompt = "You are a helpful assistant.",
+
+      hooks = {},
+      tools = {},
+    })
+  end,
+  keys = {
+    { "<leader>ac", "<cmd>Barebones<cr>", desc = "Barebones" },
+  },
+}
+```
+
+No dependencies beyond Neovim 0.10+ and `curl` on `$PATH`.
 
 ## Usage
 
-Run `:BarebonesChat` to open the chat buffer. Type your prompt and press `<CR>` in normal mode to submit.
-
-## Safety
-
-When the LLM attempts to call a tool where `modifies_state = true`, `barebones-chat.nvim` intercepts the execution and prompts you in the Neovim command line:
-
-```
-[Barebones Chat] LLM wants to run tool 'run_pytest'
-Arguments: {"filepath": "tests/test_main.py"}
-
-Allow execution? [Y/n]: 
-```
+Run `:Barebones` to open the prompt buffer. Write your prompt and press `<CR>` in normal mode to submit.
