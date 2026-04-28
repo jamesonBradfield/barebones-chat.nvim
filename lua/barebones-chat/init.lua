@@ -42,6 +42,7 @@ end
 M.config = core.config
 M.utils = core.utils
 M.default_tools = core.default_tools
+M.system_prompts = core.system_prompts
 M.execute_tool = function(...) return core.execute_tool(...) end
 
 return M
