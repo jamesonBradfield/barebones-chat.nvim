@@ -5,6 +5,7 @@ M.response_buf = nil ---@type integer?
 M.input_win = nil    ---@type integer?
 M.input_buf = nil    ---@type integer?
 
+local _spinner_frames = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
 local _spinner_timer = nil ---@type uv.uv_timer_t?
 local _augroup = nil       ---@type integer?
 
@@ -40,7 +41,8 @@ function M.start_thinking()
   _spinner_timer = vim.uv.new_timer()
   _spinner_timer:start(0, 80, vim.schedule_wrap(function()
     if not is_open() then M.stop_thinking(); return end
-    vim.wo[M.response_win].winbar = require("snacks").util.spinner() .. " generating"
+    local frame = _spinner_frames[(math.floor(vim.uv.hrtime() / (1e6 * 80)) % #_spinner_frames) + 1]
+    vim.wo[M.response_win].winbar = frame .. " generating"
   end))
 end
 
